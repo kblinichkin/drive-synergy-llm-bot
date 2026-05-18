@@ -1,186 +1,396 @@
-# Telegram LLM Bot
+# DriveSynergyBot
 
-This is a guide on how to build a Telegram Bot backed by
-an LLM (i.e. llama2-chat, llama2-chat-32k, vicuna). The bot is
-hosted on a free tier EC2 instance, the llm inference is hosted on
-Beam Cloud as a serverless REST API, which is free for the first
-10 hours of compute. The whole thing is quite slow, but this is just
-a starting point.
+A resume matchmaking Telegram bot for private business communities. Members upload their CV, the bot extracts a structured profile, and anyone can search for collaborators, co-founders, or specialists using natural language queries.
 
-<img src="https://drive.google.com/uc?export=view&id=130x9x3F9KIn9Ki7d4Yc_SJk73vldaIMj" width="300">
+---
 
-## Quickstart
+## Features
 
-### 1) Create a Telegram Bot
+| Command | Description |
+|---|---|
+| `/start` | Welcome message and instructions |
+| `/register` | Upload a resume (PDF / DOC / DOCX) to join the network |
+| `/find` | Search for matching community members |
+| `/mystatus` | View your current profile |
+| `/summary` | Community overview — member count + LLM-generated analysis |
+| `/delete` | Remove your profile |
+| `/language` | Switch bot language (🇬🇧 English / 🇷🇺 Русский) |
+| `/help` | List all commands |
+| `/stats` | Total member count *(admin only)* |
+| `/list` | List all registered members *(admin only)* |
 
-You can follow this guide to build a Python Telegram Bot:
+**Languages:** English and Russian, auto-detected from Telegram locale and overridable per-user.
 
-[How to Create a Telegram Bot using Python
-](https://www.freecodecamp.org/news/how-to-create-a-telegram-bot-using-python/)
+---
 
-Here I will give you the main steps:
+## How it works
 
-1) Search for **@botfather** in Telegram.
-2) Start a conversation with BotFather by clicking on the **Start** button.
-3) Type **/newbot**, and follow the prompts to set up a new bot.
-4) Type the name you want to give the bot.
-5) Type the username you want to give the bot.
-6) The BotFather will finally answer with a token that we can use to access the HTTP API. Store the token because we
-   will need to use it later.
-
-You can now start a conversation with your bot
-by searching for the username on Telegram.
-
-### 2) LLM inference on Beam
-
-As for hosting the llm inference the best option I found for now
-is [Beam Cloud](https://www.beam.cloud/). Their compute prices are among the cheapest and
-they offer 10 hours of free compute with nice GPUs. The offer free
-storage, which is highly appreciated.
-
-The chatbot is built using langchain and huggingface. So if you want
-to the [Llama 2](https://huggingface.co/meta-llama/Llama-2-7b-chat) family of models you will need to require access to
-the models.
-It is very easy to do and they are really quick at approving the request.
-
-TODO I used a couple of sources to put together langchain and HF,
-I will add them ASAP.
-
-If you want to use gated models you will need to set an hugging face token.
-This is built in the code, I will fix it in the next days.
-
-This is a guide to generate the token:
-
-[HuggingFace User access tokens
-](https://huggingface.co/docs/hub/security-tokens)
-
-Once you have created your account, no payment method required,
-go to the dashboard and under the Settings tab on the right
-menu you can find the Secrets.
-If you are using a model like llama 2 that requires an hugging face
-token then you need to set the **HF_TOKEN** variable with the hugging face token.
-
-Then you can do everything locally. Move to the
-lm subdirectory.
-
-```shell
-cd ./src/telegram_llm_bot/shared/llm/beam
+```
+User uploads PDF/DOCX
+        │
+        ▼
+   parser.py          — extract raw text (pymupdf / python-docx)
+        │
+        ▼
+   extractor.py       — LLM call → structured JSON (name, headline,
+        │               skills, industries, experience, looking_for, location)
+        ▼
+   embedder.py        — sentence-transformers → 384-dim vector
+        │
+        ├──▶ Weaviate  — profile + vector (for semantic search)
+        ├──▶ MongoDB   — user registry (telegram_id, status, timestamps)
+        └──▶ MinIO     — original resume file
 ```
 
-Follow the Beam installation guide [Beam Installation](https://docs.beam.cloud/getting-started/installation).
+**Search flow:**
 
-Inside the app.py file you can modify the following
-variables or leave them as they are. I will soon move them
-to a configuration file:
-
-```python
-HF_CACHE = "./models"
-MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"
-APP_NAME = "travel-guru"
-GPU = "T4"
-MEMORY = "16Gi"
+```
+User types query
+        │
+        ▼
+   embed query        — same model as profiles
+        │
+        ▼
+   Weaviate hybrid    — vector + BM25 keyword search → top 10 candidates
+        │
+        ▼
+   LLM re-rank        — ranks candidates, writes match reasons
+        │
+        ▼
+   Result cards       — name, headline, match reason, skills, contact link
 ```
 
-You are ready to deploy the app:
+---
 
-```shell
-beam deploy app.py
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Bot framework | python-telegram-bot v21 (async) |
+| LLM | OpenRouter (configurable model, e.g. `anthropic/claude-3-haiku`) |
+| Embeddings | `all-MiniLM-L6-v2` via sentence-transformers (local, no API key) |
+| Vector database | Weaviate 1.27+ (self-hosted) |
+| Object storage | MinIO (self-hosted, stores original resume files) |
+| Database | MongoDB 6 (user registry) |
+| Resume parsing | pymupdf (PDF), python-docx (DOCX), antiword (legacy .doc) |
+| Infrastructure | Docker Compose |
+
+---
+
+## Prerequisites
+
+- Docker + Docker Compose (Docker Desktop or OrbStack on macOS)
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+- An [OpenRouter](https://openrouter.ai) API key
+
+---
+
+## Configuration
+
+All settings are loaded from environment variables via `config/settings.py`. Never commit credential files.
+
+### `.env` — infrastructure
+
+```
+MONGODB_URI=mongodb://mongo:27017
+MONGODB_DB=matchbot
 ```
 
-The app should be up and running now. Go to the Beam Dashboard
-and under the Apps tab you can find your app.
+### `.env.bot` — bot credentials
 
-### 3) Host the Telegram bot
+```
+TELEGRAM_BOT_TOKEN=          # from @BotFather
+OPENROUTER_API_KEY=          # from openrouter.ai
+OPENROUTER_MODEL=anthropic/claude-3-haiku   # any OpenRouter model slug
 
-You can host your bot for free on a free tier EC2 instance. This is
-a guide you can follow:
+ADMIN_TELEGRAM_IDS=123456789  # comma-separated, for /stats and /list
+ALLOWED_GROUP_ID=             # optional: restrict to one group chat
 
-[Tutorial: Get started with Amazon EC2 Linux instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html)
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+EMBEDDING_DIMS=384
 
-During the creation of the instance you have to
-remember to create a key pair that you will use to connect
-via ssh to your instance remotely.
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=resumes
 
-I recommend to set Ubuntu as OS.
-
-Once you set the key pair, the .pem will be automatically downloaded.
-
-Now you can connect to the ec2 instance via command line using ssh:
-
-```shell
-ssh -i "{filename}.pem" ubuntu@{address}.{region}.compute.amazonaws.com
+SEARCH_TOP_K=10     # candidates fetched from Weaviate
+SEARCH_RETURN_TOP=5 # results shown after LLM re-rank
 ```
 
-Clone this repository on the ec2 instance. We will only need the bot folder, we do need the rest,
-so I will probably separate it from the rest in the future, for now this is
-not a big problem:
+---
 
-```shell
-git clone https://github.com/ma2za/telegram-llm-bot.git
+## Running locally
+
+### Path A — everything in Docker (recommended)
+
+All four services (`mongo`, `weaviate`, `minio`, `matchbot`) run together, read env from `.env` + `.env.bot`, and talk to each other by service name.
+
+```bash
+# First time only — build the bot image (~3 min)
+docker compose build matchbot
+
+# Start infrastructure, wait for healthy status
+docker compose up -d mongo weaviate minio
+docker compose ps
+
+# Start the bot in foreground (Ctrl+C to stop)
+docker compose up matchbot
 ```
 
-Move to the bot directory
+You should see these lines in order:
 
-```shell
-cd telegram-llm-bot
+```
+Starting DriveSynergyBot (model=anthropic/claude-3-haiku)...
+MongoDB indexes ensured.
+Weaviate schema ensured.
+MinIO bucket ensured.
+Bot commands registered.
+MatchBot ready ✓
 ```
 
-Create a .env file to set the environment variables common to all your bots
+**Quick smoke test:**
 
-```shell
-touch .env
+1. Open a private Telegram chat with your bot.
+2. Send `/start` — welcome message (tests handler dispatch, no LLM).
+3. Send `/register`, upload any PDF/DOCX resume.
+   You should see in the logs: `OpenRouter extraction: model=… tokens_in=… latency=…s`
+4. Confirm the preview, then send `/find React developer fintech` — you should see: `OpenRouter matchmaking: model=… tokens_in=… latency=…s`
+
+**Full rebuild and restart** (after code changes):
+
+```bash
+docker compose down
+docker compose build matchbot
+docker compose up -d mongo weaviate minio
+docker compose up matchbot
 ```
 
-Via nano modify the content of the .env with the following content.
+**Stop and wipe data volumes:**
 
-```shell
-MONGO_HOST=telegram-mongo
-MONGO_PORT=27017
+```bash
+docker compose down -v   # removes mongo/weaviate/minio data too
 ```
 
-This is required to set up a MongoDB database to store the conversations.
+**Inspect data while the bot runs:**
 
-Create another .env file specific for a bot to set the environment variables
+```bash
+# MinIO web console
+open http://localhost:9001          # login: minioadmin / minioadmin
 
-```shell
-touch ./src/telegram_llm_bot/bots/base_chatbot/.env
+# MongoDB shell
+docker compose exec mongo mongosh matchbot
+> db.users.find().pretty()
+
+# Weaviate schema
+curl http://localhost:8080/v1/schema
 ```
 
-Via nano modify the content of the .env with the following content.
+---
 
-```shell
-TELEGRAM_BOT_TOKEN =
-BEAM_TOKEN =
-BEAM_URL = https://apps.beam.cloud/{something}
-SETTINGS_FILE=telegram_llm_bot.bots.base_chatbot.settings
-BOT_NAME=travel-guru
+### Path B — bot on host, infra in Docker (better for debugging)
+
+Useful when you want breakpoints, `pdb`, or hot-reload without rebuilding the image.
+
+```bash
+# 1. Start only infra
+docker compose up -d mongo weaviate minio
+
+# 2. Use the local env overrides (points at localhost instead of docker DNS)
+cp .env.local.example .env.local
+
+# 3. Install Python deps on the host
+poetry install
+
+# 4. Load all env files and run
+set -a
+source .env
+source .env.bot
+source .env.local   # must come last to override docker service hostnames
+set +a
+
+poetry run python -m telegram_llm_bot.main
 ```
 
-**TELEGRAM_BOT_TOKEN** is the token we received earlier from the BotFather.
+The first run downloads the `all-MiniLM-L6-v2` model (~90 MB). Subsequent runs are instant.
 
-**BEAM_TOKEN**: under **API Keys** in the Beam app dashboard
-you can generate a Beam token.
+---
 
-**BEAM_URL** is obtained from the overview of the app
-where you can click on Call API and there you can easily find out the url
+### Useful debug commands
 
-We can finally use docker compose to build images and run the containers.
+```bash
+# Tail bot logs, show only LLM and error lines
+docker compose logs -f matchbot | grep -E "OpenRouter|ERROR|extraction|matchmaking"
 
-Install Docker and Docker compose. Here is the official guide:
+# Reset only the vector DB (keeps user registry in Mongo)
+docker compose exec weaviate curl -X DELETE http://localhost:8080/v1/schema/MemberProfile
 
-[Install Docker Engine on Ubuntu
-](https://docs.docker.com/engine/install/ubuntu/)
-
-Build, create and start the containers:
-
-```shell
-sudo docker compose up -d --build
+# Check bot can reach OpenRouter from inside the container
+docker compose exec matchbot python -c "
+import os, httpx
+r = httpx.get('https://openrouter.ai/api/v1/models',
+              headers={'Authorization': f\"Bearer {os.environ['OPENROUTER_API_KEY']}\"},
+              timeout=10)
+print(r.status_code, r.text[:200])
+"
 ```
 
-We are done here!
+---
 
-The system prompts are contained in **config.yml**.
+### Common gotchas
 
-You are ready to chat! 🚀🚀🚀🚀🚀
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ValidationError: openrouter_api_key Field required` | `.env.bot` not loaded | Run from project root; check `env_file` in `compose.yaml` |
+| `getaddrinfo failed: 'weaviate'` | Using Path B without `.env.local` | Re-source `.env.local` |
+| `Unauthorized: 401` from Telegram | Placeholder token | Fill in `TELEGRAM_BOT_TOKEN` |
+| `401 Unauthorized` from OpenRouter | Invalid key | Check `OPENROUTER_API_KEY` |
+| "Unsupported file format" for a valid PDF | Scanned image PDF (no selectable text) | Confirm by trying to select text in a PDF viewer |
+| Weaviate unhealthy on startup | Slow first boot (~30–60 s on ARM) | `start_period: 60s` is set in `compose.yaml`; just wait |
 
-<img src="https://drive.google.com/uc?export=view&id=1EQt9KahzYwWEqOiQMaOrjpRxxZ2IsaoD" width="300">
+---
+
+## Planned features *(TBD)*
+
+### Voice input for search queries
+
+Instead of typing a `/find` query, users could send a voice message. The pipeline would be:
+
+```
+Voice message
+      │
+      ▼
+OpenAI Whisper API     — speech-to-text transcription (whisper-1 model)
+      │
+      ▼
+LLM cleanup pass       — correct ASR errors, normalise punctuation,
+      │                  keep content and language unchanged
+      ▼
+/find pipeline         — embed → Weaviate search → LLM rank → result cards
+```
+
+**Technology stack:**
+- Transcription: `openai.Audio.transcribe("whisper-1", ...)` — language auto-detected or pinned per user
+- Post-processing: one short LLM call to fix ASR artefacts before the text is used as a search query (avoids nonsense embeddings from garbled speech)
+- For Azure production: Azure AI Speech (Speech-to-Text) can replace Whisper; Azure OpenAI handles the cleanup pass
+
+**Implementation notes:**
+- Add a `MessageHandler(filters.VOICE, voice_search_handler)` alongside the existing `/find` ConversationHandler
+- The voice handler downloads the `.oga` file, transcribes it, then feeds the result into `_run_search()` — no changes needed to the search pipeline itself
+- Per-user daily transcription limits (seconds of audio) should be enforced to control API costs; MongoDB `users` collection can store the counter
+
+---
+
+## Production deployment on Azure *(TBD)*
+
+> This section documents the intended Azure deployment path. Implementation is pending.
+
+### Planned architecture
+
+The local Docker Compose setup maps directly to managed Azure services:
+
+| Local (Docker Compose) | Azure equivalent |
+|---|---|
+| `matchbot` container | Azure Container Apps |
+| MongoDB | Azure Cosmos DB for MongoDB |
+| Weaviate | Self-hosted on AKS, or Azure AI Search *(evaluate)* |
+| MinIO | Azure Blob Storage |
+
+### LLM provider for production
+
+For production, the bot can be switched from OpenRouter to **Azure OpenAI** by changing three settings in `.env.bot`:
+
+```
+# Replace these OpenRouter settings…
+OPENROUTER_API_KEY=…
+OPENROUTER_MODEL=anthropic/claude-3-haiku
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+# …with Azure OpenAI equivalents
+AZURE_OPENAI_API_KEY=…
+AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
+AZURE_OPENAI_API_VERSION=2024-02-01
+```
+
+The OpenAI Python SDK (already a dependency) supports Azure OpenAI natively via `AzureOpenAI` client — no extra packages needed. The switch requires a small update to `matching/agent.py` and `pipeline/extractor.py` to instantiate `AzureOpenAI` instead of the OpenRouter-pointed `AsyncOpenAI`.
+
+### Still to be defined
+
+- [ ] Azure Container Apps deployment YAML / Bicep templates
+- [ ] Secrets management (Azure Key Vault)
+- [ ] CI/CD pipeline (GitHub Actions → ACR → Container Apps)
+- [ ] Cosmos DB connection string and index configuration
+- [ ] Azure Blob Storage adapter (drop-in for MinIO client)
+- [ ] Weaviate hosting decision (AKS vs managed alternative)
+- [ ] Environment promotion strategy (dev → staging → prod)
+
+---
+
+## Project structure
+
+```
+src/telegram_llm_bot/
+├── main.py                  # Entry point — builds Application, registers handlers
+│
+├── config/
+│   ├── settings.py          # Pydantic Settings — all env vars
+│   ├── prompts.py           # LLM system prompts and templates
+│   └── i18n.py              # User-facing strings in en / ru
+│
+├── handlers/
+│   ├── registration.py      # ConversationHandler FSM for /register
+│   ├── search.py            # /find — ConversationHandler + search execution
+│   ├── commands.py          # /start /help /mystatus /delete /summary /language
+│   ├── admin.py             # /stats /list (admin only)
+│   ├── fallback.py          # Catch-all for unrecognised messages
+│   └── i18n_helpers.py      # get_lang(), sync_commands()
+│
+├── pipeline/
+│   ├── parser.py            # PDF/DOCX → raw text
+│   ├── extractor.py         # LLM → structured profile fields
+│   ├── embedder.py          # text → vector
+│   └── ingestion.py         # Orchestrates parser → extractor → embedder → store
+│
+├── storage/
+│   ├── weaviate_client.py   # Schema, upsert, hybrid search, fetch_all_profiles
+│   ├── mongo_client.py      # User registry CRUD, language preference
+│   └── minio_client.py      # Resume file upload/download/delete
+│
+└── matching/
+    └── agent.py             # Embed query → Weaviate search → LLM rank → format cards
+```
+
+---
+
+## Data model
+
+### MongoDB — `users` collection
+
+```json
+{
+  "telegram_id": 123456789,
+  "telegram_username": "username",
+  "full_name": "Jane Smith",
+  "registered_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z",
+  "profile_status": "active",
+  "lang": "ru",
+  "minio_key": "resumes/123456789/cv.pdf",
+  "weaviate_uuid": "..."
+}
+```
+
+### Weaviate — `MemberProfile` collection
+
+Fields: `telegram_id`, `full_name`, `headline`, `skills`, `industries`, `experience`, `looking_for`, `location`, `resume_text`.
+Vector is the embedding of `headline + skills + experience + looking_for`.
+
+---
+
+## Adding a language
+
+1. Add the language code to `SUPPORTED_LANGS` in `config/i18n.py`
+2. Add translations for every key in `_STRINGS`
+3. Add a `BotCommand` list entry in `COMMANDS`
+4. Add a button in `_LANGUAGE_LABELS` in `handlers/commands.py`
