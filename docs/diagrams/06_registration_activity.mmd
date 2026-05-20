@@ -1,0 +1,32 @@
+flowchart TD
+    A([User sends /register]) --> B{Already registered?}
+    B -->|No| C[Send upload prompt]
+    B -->|Yes| D[Send re-upload prompt<br/>upsert will replace existing]
+    C & D --> E[Wait for document]
+
+    E --> F{Valid format?<br/>PDF / DOC / DOCX}
+    F -->|No| G[Send format error] --> E
+    F -->|Yes| H[Send processing message]
+
+    H --> I[parser.extract_text]
+    I --> J{Extraction OK?}
+    J -->|Empty text| K[Send error: unreadable file] --> E
+    J -->|OK| L[extractor.extract_profile_fields via LLM]
+
+    L --> M{LLM response valid JSON?}
+    M -->|No or error| N[Send error message] --> E
+    M -->|Yes| O[embedder.embed_profile]
+
+    O --> P[Show profile preview card]
+    P --> Q{User confirms?}
+    Q -->|No / re-upload| E
+    Q -->|/cancel| R([End cancelled])
+    Q -->|Yes| S{Existing profile?}
+
+    S -->|Yes upsert| T[Delete old Weaviate object<br/>Overwrite MinIO file]
+    S -->|No insert| U[Fresh insert path]
+    T & U --> V[mongo_client.upsert_user]
+    V --> W[weaviate_client.upsert_member_profile]
+    W --> X[minio_client.upload_resume]
+    X --> Y[Send success message]
+    Y --> Z([End])

@@ -1,0 +1,30 @@
+sequenceDiagram
+    actor U as User
+    participant TG as Telegram API
+    participant CMD as commands.py
+    participant MONGO as MongoDB
+    participant WEAV as Weaviate
+    participant OR as OpenRouter LLM
+
+    U->>TG: /summary
+    TG->>CMD: command event
+    CMD-->>U: Analysing community...
+
+    CMD->>MONGO: count_active_users()
+    MONGO-->>CMD: count
+
+    alt count == 0
+        CMD-->>U: No members yet
+    else count > 0
+        CMD->>WEAV: fetch_all_profiles(limit=500)
+        Note over WEAV: Returns headline, skills,<br/>industries, looking_for,<br/>location only
+        WEAV-->>CMD: profiles list
+
+        CMD->>CMD: _aggregate_profiles()
+        Note over CMD: Builds Counter tables:<br/>top 25 skills, top 15 industries,<br/>top 15 locations + 12 samples each
+
+        CMD->>OR: SUMMARY_SYSTEM_PROMPT + aggregated_stats
+        OR-->>CMD: 5-8 sentence community overview
+
+        CMD-->>U: Member count + LLM analysis
+    end

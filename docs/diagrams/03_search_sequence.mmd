@@ -1,0 +1,45 @@
+sequenceDiagram
+    actor U as User
+    participant TG as Telegram API
+    participant SRCH as search.py
+    participant MONGO as MongoDB
+    participant AGENT as agent.py
+    participant EMBD as embedder.py
+    participant MINIML as all-MiniLM-L6-v2<br/>(local, no API)
+    participant WEAV as Weaviate
+    participant OR as OpenRouter LLM
+
+    U->>TG: /find optional query
+    TG->>SRCH: command event
+
+    SRCH->>MONGO: get_user(telegram_id)
+    alt Not registered
+        MONGO-->>SRCH: null
+        SRCH-->>U: Please register first
+    else Registered
+        MONGO-->>SRCH: user doc
+
+        alt No inline query
+            SRCH-->>U: Enter your search query
+            Note over SRCH: STATE: WAITING_QUERY
+            U->>TG: search text
+            TG->>SRCH: text event
+        end
+
+        SRCH->>AGENT: find_matches(query, lang)
+        AGENT->>EMBD: embed_text(query)
+        EMBD->>MINIML: encode(query_text)
+        MINIML-->>EMBD: 384-dim float vector
+        EMBD-->>AGENT: query_vector
+
+        AGENT->>WEAV: hybrid_search(query, vector, top_k=10)
+        WEAV-->>AGENT: candidate profiles
+
+        AGENT->>OR: MATCHMAKING_SYSTEM_PROMPT + candidates_json
+        OR-->>AGENT: ranked list with REASON per match
+
+        AGENT-->>SRCH: formatted match cards
+
+        SRCH-->>U: Result cards with contact links
+        Note over SRCH: END
+    end

@@ -1,0 +1,26 @@
+flowchart TD
+    A([User sends /find]) --> B{User registered?}
+    B -->|No| C[Send register-first message] --> Z([End])
+    B -->|Yes| D{Query in command?}
+
+    D -->|Yes| F[Use inline query]
+    D -->|No| E[Ask for query text]
+    E --> G[Wait for text input]
+    G --> F
+
+    F --> H[Send searching message]
+    H --> I[embedder.embed_text query]
+
+    I --> J[weaviate_client.hybrid_search<br/>vector + BM25 top_k=10]
+    J --> K{Candidates found?}
+
+    K -->|None| L[Send no-results message] --> Z
+    K -->|Found| M[agent.py LLM re-rank<br/>MATCHMAKING_SYSTEM_PROMPT<br/>+ candidates_json]
+
+    M --> N{LLM returns NO_MATCHES?}
+    N -->|Yes| L
+    N -->|No| O[Parse ranked blocks<br/>RANK / NAME / REASON / SKILLS / TELEGRAM_ID]
+
+    O --> P[Format result cards<br/>name + headline + reason<br/>skills + contact link]
+    P --> Q[Send cards to user]
+    Q --> Z

@@ -1,0 +1,75 @@
+graph TB
+    subgraph TG["Telegram Layer"]
+        U((User))
+        TGA[Telegram API]
+    end
+
+    subgraph BOT["Bot Application"]
+        direction TB
+        MAIN[main.py<br/>Application entry-point]
+        subgraph HANDLERS["Handlers"]
+            REG[registration.py<br/>FSM /register]
+            SRCH[search.py<br/>/find]
+            CMD[commands.py<br/>/start /help /mystatus<br/>/delete /summary /language]
+            ADM[admin.py<br/>/stats /list]
+            FB[fallback.py<br/>catch-all]
+        end
+        subgraph PIPELINE["Ingestion Pipeline"]
+            PARSE[parser.py<br/>PDF/DOCX to text]
+            EXTR[extractor.py<br/>LLM to structured JSON]
+            EMBD[embedder.py<br/>text to 384-dim vector]
+            INGEST[ingestion.py<br/>orchestrator]
+        end
+        subgraph MATCHING["Matching"]
+            AGENT[agent.py<br/>embed / search / rank / format]
+        end
+        subgraph CONFIG["Config"]
+            SETTINGS[settings.py]
+            PROMPTS[prompts.py]
+            I18N[i18n.py]
+        end
+    end
+
+    subgraph STORAGE["Storage Layer"]
+        MONGO[(MongoDB<br/>user registry)]
+        WEAV[(Weaviate<br/>vector search)]
+        MINIO[(MinIO<br/>resume files)]
+    end
+
+    subgraph LLM["LLM Layer (remote — OpenRouter)"]
+        OR[OpenRouter<br/>claude-3-haiku]
+    end
+
+    subgraph LOCAL_ML["Local ML (no API key)"]
+        MINIML[all-MiniLM-L6-v2<br/>sentence-transformers<br/>384-dim embeddings]
+    end
+
+    U -->|sends commands / files| TGA
+    TGA <-->|python-telegram-bot v21| MAIN
+    MAIN --> HANDLERS
+    MAIN --> SETTINGS
+
+    REG --> INGEST
+    SRCH --> AGENT
+    CMD --> MONGO
+    CMD --> WEAV
+    CMD --> OR
+
+    INGEST --> PARSE
+    INGEST --> EXTR
+    INGEST --> EMBD
+    INGEST --> MONGO
+    INGEST --> WEAV
+    INGEST --> MINIO
+
+    EXTR --> OR
+    EMBD --> MINIML
+    AGENT --> EMBD
+    AGENT --> WEAV
+    AGENT --> OR
+
+    style TG fill:#dbeafe,stroke:#3b82f6
+    style BOT fill:#f0fdf4,stroke:#22c55e
+    style STORAGE fill:#fef9c3,stroke:#eab308
+    style LLM fill:#fce7f3,stroke:#ec4899
+    style LOCAL_ML fill:#f0fdf4,stroke:#16a34a

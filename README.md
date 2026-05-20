@@ -252,6 +252,29 @@ print(r.status_code, r.text[:200])
 
 ## Planned features *(TBD)*
 
+### Profile sanity check after LLM extraction
+
+Before saving a registration, validate that the LLM-extracted profile meets a minimum quality bar. The current pipeline accepts whatever the model returns, which can produce near-empty or low-signal profiles when the uploaded file is a scanned image, a template with no real content, or a non-resume document.
+
+**Checks to implement in `pipeline/extractor.py` or `pipeline/ingestion.py`:**
+
+| Check | Condition | Action |
+|---|---|---|
+| Name present | `full_name` is non-null and ≥ 2 words | Reject — ask user to re-upload |
+| Skills populated | `skills` list has ≥ 3 entries | Warn user, allow save |
+| Skills not generic | No entry is a single generic word like "Communication" or "Teamwork" alone | Log warning |
+| Experience present | `experience` is non-null and ≥ 30 chars | Warn user, allow save |
+| Headline present | `headline` is non-null and ≥ 10 chars | Warn user, allow save |
+| Overall completeness score | Count non-null fields out of 7 | Reject if < 3 filled |
+
+**Implementation notes:**
+- Define a `validate_extracted_profile(profile: ExtractedProfile) -> list[str]` function that returns a list of human-readable issue strings
+- If critical fields (name) are missing, `ingestion.py` raises a `ProfileValidationError` and the registration handler asks the user to re-upload with a specific message
+- If only soft fields are missing, the profile preview card shown to the user should highlight the missing fields in the confirmation step so they can decide whether to proceed or re-upload a better CV
+- Consider a second LLM call as a fallback for borderline cases: ask the model to confirm whether the document is actually a resume
+
+---
+
 ### Voice input for search queries
 
 Instead of typing a `/find` query, users could send a voice message. The pipeline would be:

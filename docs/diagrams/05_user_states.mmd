@@ -1,0 +1,27 @@
+stateDiagram-v2
+    [*] --> Unknown : First contact
+
+    Unknown --> Registering : /register
+    Registering --> Unknown : /cancel or timeout
+    Registering --> Registered : Confirms profile preview
+
+    Registered --> Registering : /register re-upload
+    Registered --> Unknown : /delete profile removed
+
+    state Unknown {
+        [*] --> NoProfile
+        NoProfile : No data in MongoDB or Weaviate
+    }
+
+    state Registered {
+        [*] --> Active
+        Active : MongoDB profile_status = active
+        Active : Weaviate vector + profile stored
+        Active : MinIO resume file stored
+    }
+
+    state Registering {
+        [*] --> AwaitingFile
+        AwaitingFile --> AwaitingConfirm : File received and parsed
+        AwaitingConfirm --> AwaitingFile : No, re-upload
+    }

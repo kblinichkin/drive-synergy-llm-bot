@@ -1,0 +1,24 @@
+flowchart TD
+    A([get_lang called]) --> B{user_data cache<br/>has lang?}
+    B -->|Yes| Z([Return cached lang])
+    B -->|No| C[get_user from MongoDB]
+
+    C --> D{MongoDB has<br/>lang field?}
+    D -->|Yes| E[Store in user_data cache]
+    E --> Z
+    D -->|No| F{Telegram locale<br/>available?}
+
+    F -->|Yes| G[Take first 2 chars<br/>e.g. ru_RU to ru]
+    G --> H{In SUPPORTED_LANGS?}
+    H -->|Yes| I[Store in user_data cache]
+    I --> Z
+    H -->|No| J[Default to en]
+    F -->|No| J
+    J --> Z
+
+    subgraph Override["/language command override"]
+        K([User picks language]) --> L[set_user_language in MongoDB]
+        L --> M[set_lang_cache in user_data]
+        M --> N[sync_commands BotCommandScopeChat]
+        N --> O([Menu localised for this chat])
+    end

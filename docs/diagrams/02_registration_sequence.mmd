@@ -1,0 +1,48 @@
+sequenceDiagram
+    actor U as User
+    participant TG as Telegram API
+    participant REG as registration.py
+    participant INGEST as ingestion.py
+    participant PARSE as parser.py
+    participant EXTR as extractor.py
+    participant OR as OpenRouter LLM
+    participant EMBD as embedder.py
+    participant MINIML as all-MiniLM-L6-v2<br/>(local, no API)
+    participant MONGO as MongoDB
+    participant WEAV as Weaviate
+    participant MINIO as MinIO
+
+    U->>TG: /register
+    TG->>REG: command event
+    REG-->>U: Send your resume (PDF/DOCX)
+    Note over REG: STATE: UPLOAD_RESUME
+
+    U->>TG: uploads file
+    TG->>REG: document event
+    REG->>INGEST: run_pipeline(file_bytes, mime)
+
+    INGEST->>PARSE: extract_text(file_bytes, mime)
+    PARSE-->>INGEST: raw_text string
+
+    INGEST->>EXTR: extract_profile_fields(raw_text)
+    EXTR->>OR: EXTRACTION_SYSTEM_PROMPT + raw_text
+    OR-->>EXTR: JSON name, headline, skills...
+    EXTR-->>INGEST: ExtractedProfile (validated)
+
+    INGEST->>EMBD: embed_profile(profile_dict)
+    EMBD->>MINIML: encode(headline + skills + experience + looking_for)
+    MINIML-->>EMBD: 384-dim float vector
+    EMBD-->>INGEST: 384-dim vector
+
+    INGEST-->>REG: ExtractedProfile + vector
+    REG-->>U: Profile preview card
+    Note over REG: STATE: CONFIRM_PROFILE
+
+    U->>TG: Yes, save it
+    TG->>REG: text event
+
+    REG->>MONGO: upsert_user(telegram_id, profile)
+    REG->>WEAV: upsert_member_profile(profile, vector)
+    REG->>MINIO: upload_resume(file_bytes, key)
+    REG-->>U: You are registered!
+    Note over REG: END
