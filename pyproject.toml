@@ -10,7 +10,8 @@ packages = [{ include = "telegram_llm_bot", from = "src" }]
 python = "^3.11"
 
 # ── Telegram bot framework ────────────────────────────────────────────────────
-python-telegram-bot = "^21.0"
+# [job-queue] extra adds APScheduler, required for conversation_timeout support
+python-telegram-bot = {version = "^21.0", extras = ["job-queue"]}
 
 # ── LLM — OpenRouter via OpenAI-compatible SDK ───────────────────────────────
 openai = "^1.12.0"
